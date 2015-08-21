@@ -1,0 +1,709 @@
+/**
+ * Automate Smoketest Logs
+ * The purpose of this script is to pull necessary information from the Smoketest Log
+ * and assemble it together to formulate a report on the day's findings.
+ * A couple components go into this process:
+ * 1) Pull Build Information from relevant sheet
+ * 2) Create Google Doc with Smoke Status Report Information
+ * 3) Email Status Report to all Smoke Members
+ * 4) Create Google Form to have all Smoke Members sign off on the completed report(?)
+ 
+ * Tasks (incorporated with Google Form):
+ * 1) Run from Spreadsheet
+ *   - Set Active: 'Smoketest Log'
+ * 2) Determine Active Sheet
+ *   - From Radio Buttons
+ *      a) 2.1 or 2.2
+ *      b) Full or Reduced Report
+ * 3) Create Status Report
+ *   a) Add Notes from Form
+ *   b) Assemble Title
+ *   c) Assemble Body
+ * 4) Determine Email Audience
+ *   a) Smoke or Mozilla
+ * 5) Save Report as Doc for Archive
+ * 6) Save sent report from Mozilla for Archive
+*/
+
+//Smoketest Results Links
+//var uSmoketestResults21F = "https://docs.google.com/a/qanalydocs.com/spreadsheet/ccc?key=0AjRc6aVFoOW9dGZLdVdiWGZLbVdORlFpUGt5XzZ3Znc&usp#gid=0";
+//var uSmoketestResults21R = "https://docs.google.com/a/qanalydocs.com/spreadsheet/ccc?key=0AjRc6aVFoOW9dGZLdVdiWGZLbVdORlFpUGt5XzZ3Znc&usp#gid=11";
+var uSmoketestResults22F = "https://docs.google.com/a/qanalydocs.com/spreadsheet/ccc?key=0AjRc6aVFoOW9dGZLdVdiWGZLbVdORlFpUGt5XzZ3Znc&usp#gid=11"; //"https://docs.google.com/a/qanalydocs.com/spreadsheet/ccc?key=0AjRc6aVFoOW9dGZLdVdiWGZLbVdORlFpUGt5XzZ3Znc&usp#gid=13";
+var uSmoketestResults22R = "https://docs.google.com/a/qanalydocs.com/spreadsheet/ccc?key=0AjRc6aVFoOW9dGZLdVdiWGZLbVdORlFpUGt5XzZ3Znc&usp#gid=0"; //"https://docs.google.com/a/qanalydocs.com/spreadsheet/ccc?key=0AjRc6aVFoOW9dGZLdVdiWGZLbVdORlFpUGt5XzZ3Znc&usp#gid=14";
+var uSmoketestResults30F = "https://docs.google.com/a/qanalydocs.com/spreadsheet/ccc?key=0AjRc6aVFoOW9dGZLdVdiWGZLbVdORlFpUGt5XzZ3Znc&usp#gid=13";
+var uSmoketestResults30R = "https://docs.google.com/a/qanalydocs.com/spreadsheet/ccc?key=0AjRc6aVFoOW9dGZLdVdiWGZLbVdORlFpUGt5XzZ3Znc&usp#gid=14";
+
+//Smoketest Log Links
+var uTestLog = "https://docs.google.com/a/qanalydocs.com/spreadsheets/d/11NWx03tOJgxLZkXqbVHVxvMbPP91ZffnJU0KKVg5N04/edit#gid=922575973";
+var uSmoketestLog = "https://docs.google.com/a/qanalydocs.com/spreadsheets/d/13BjtbYDVaiC6TvOAd1x-SuoYNNM8aH5-xdJS7TU3o-U/";
+var uSmoketestResults = "https://docs.google.com/a/qanalydocs.com/spreadsheet/ccc?key=0AjRc6aVFoOW9dGZLdVdiWGZLbVdORlFpUGt5XzZ3Znc&usp";
+//var uSmoketestResults ="https://docs.google.com/a/qanalydocs.com/spreadsheet/ccc?key=0AjRc6aVFoOW9dGZLdVdiWGZLbVdORlFpUGt5XzZ3Znc&usp";
+var uActiveSmoketestResults = "url to smoketest results";
+//var uSmoketestResults = "https://docs.google.com/a/qanalydocs.com/spreadsheet/ccc?key=0AjRc6aVFoOW9dGZLdVdiWGZLbVdORlFpUGt5XzZ3Znc&usp";
+
+//log sheet positions
+var sFullMaster = "Master - Full";
+var sFull22 = "v2.2 - Full";
+var sFull21 = "v2.1 - Full";
+
+var sReducedMaster = "Master - Reduced";
+var sReduced22 = "v2.2 - Reduced";
+var sReduced21 = "v2.1 - Reduced";
+
+//Setup for Sheets
+//var activeSpreadsheetLink = uSmoketestLog;
+
+//Range Values
+var rangeVariables = 'C2:C17'; //add variable to this based on 2.1/2.2, full/reduced -- need these symmetrical
+var rangeFailBugs = 'C21:C89';
+var rangeFailBugsReduced = 'C21:C64';
+var rangeAutoPerformed = 'C66:C70';
+var rangeAutoBugsLogged = 'C73:C74'; //73 = new; 74 = existing
+
+
+//Report Variables -- replaced during functions
+var rTitle = "report: title";
+var rBodyIntro = "report: body: intro";
+var rBodyNotes = ""; //will detect blank entry from sidebar and be absent from report
+var rBodySLLink = "report: body: smoketestlog link";
+var rMozLink = "report: body: moztrap link";
+var rBodyEnVars = "report: body: environmental variables";
+var rBodyBugReport = "report: body: new & existing blockers";
+var rBodyClose = "report: body close";
+var CompiledReport = "compiled report from above variables";
+
+
+function onOpen() {
+  SpreadsheetApp.getUi() // Or DocumentApp or FormApp.
+      .createAddonMenu()
+      .addItem('Smoke Report', 'showSidebar')
+      .addToUi();
+   //var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+
+}
+
+function showSidebar() {
+  var html = HtmlService.createHtmlOutputFromFile('Page')
+      .setTitle('Automated Smoke Report')
+      .setWidth(300);
+  SpreadsheetApp.getUi() // Or DocumentApp or FormApp.
+      .showSidebar(html);
+}
+
+
+/*
+function doGet() {
+
+  //compileReport();
+  sendSmokeReport();
+  
+  return 0;
+}
+*/
+
+/**
+ * Retrieves the relevant range of build information and stores it in a Google Doc 
+ * [Maybe append rows to seperate spreadsheet then format Doc report?]
+ * Range is always seen in Column C from Rows 2-17 [15 evValues]:
+ * C2:  Build Date
+ * C3:  Device
+ * C4:  Build ID
+ * C5:  Gecko
+ * C6:  Gaia
+ * C7:  Gonk
+ * C8:  Version
+ * C9:  Base Image
+ * C10:  OTA Updated From [Build ID from previous column: D4 {could be in seperate sheet, safer to consult Sanity Log}]
+ * C11: Reboots
+ * C12: Crashes
+ * C13: Total Testcases
+ * C14: Not Completed
+ * C15: Pass
+ * C16: Fail
+ * C17: Not Tested
+ * C18: Smoketest Pass/Fail
+*/
+function assembleBuildInfo(ReportInfo, ReportNotes) {
+    
+ 
+  //assess sheet to work from based on ReportInfo.buildBranch & ReportInfo.
+  var activeSheet = SpreadsheetApp.getActiveSheet();
+  Logger.log("active sheet name: %s", activeSheet.getName()); 
+  
+  var dVariablesRange = activeSheet.getRange(rangeVariables);  //sheet.getSheetevValues(2, C, 15, 1);
+  dVariablesRange.activate();
+  
+  var evValues = dVariablesRange.getValues();
+  Logger.log(evValues[0][0]);
+  Logger.log("rangeVariables:\n%s\nVariables Range:\n%s\nRange Values:\n%s\n", rangeVariables, dVariablesRange, evValues);
+  var bBuildDate = Utilities.formatDate(evValues[0][0], "PST", "MM/dd/yyyy"); //evValues[0][0];
+  var bBodyDate = Utilities.formatDate(evValues[0][0], "PST", "yyyy-MM-dd");
+  var bDevice =    evValues[1][0];
+  var bBuildID =   evValues[2][0];
+  var bGecko =     evValues[3][0];
+  var bGaia =      evValues[4][0];
+  
+  var bVersion =   evValues[6][0];
+  var bBaseImage = evValues[7][0];
+  var bGonk = (ReportInfo.flashMethod == "Shallow") ? bBaseImage.toString() + " Shallow" : evValues[5][0]; //unreliable gonk with Shallow flash
+  var bOTAFrom =   evValues[8][0];
+  var bReboots =   evValues[9][0];
+  var bCrashes =   evValues[10][0];
+  var bTotalC =    evValues[11][0];
+  var bNotCompC =  evValues[12][0];
+  var bPassC =     evValues[13][0];
+  var bFailC =     evValues[14][0];
+  var bNotTestC =  evValues[15][0];
+  var bPhoneMem = '319MB';
+  var bFlashMethod = ReportInfo.flashMethod; //pull from form
+  var bBuildBranch = ReportInfo.buildBranch; //pull from form
+  //var bSmokePF =   evValues[16][0];
+  var bCasesRun = bTotalC - bNotTestC;
+  
+  
+  if (ReportInfo.flashMethod == "Shallow")
+    bGonk = bBaseImage.toString() + " Shallow";
+  
+  
+  
+  var Info = ReportInfo;
+  var Notes = ReportNotes;
+  var BuildInfo = {
+    bBuildDate: bBuildDate,
+    bBodyDate: bBodyDate,
+    bDevice: bDevice,
+    bBuildID: bBuildID,
+    bGecko: bGecko,
+    bGaia: bGaia,
+    bGonk: bGonk,
+    bVersion: bVersion,
+    bBaseImage: bBaseImage,
+    bOTAFrom: bOTAFrom,
+    bReboots: bReboots,
+    bCrashes: bCrashes,
+    bTotalC: bTotalC,
+    bNotCompC: bNotCompC,
+    bPassC: bPassC,
+    bFailC: bFailC,
+    bNotTestC: bNotTestC,
+    bCasesRun: bCasesRun,
+    bPhoneMem: bPhoneMem,
+    //Info: ReportInfo,
+    //Notes: ReportNotes
+  }
+  
+  //rBodyNotes: pull lines from form -- confirm they are not blank,identical between
+  if (ReportNotes.notes != "") {
+    rBodyNotes =
+      "Notes:\n" + ReportNotes.notes + "\n\n";
+  }
+    
+  switch (ReportInfo.runType)
+  {
+    case 'full':
+      var BugReport = assembleBlockingBugs(rangeFailBugs, ReportInfo.runType);
+      generateFullReport(BuildInfo, BugReport, ReportInfo, ReportNotes); 
+      break;
+    case 'reduced':
+      var BugReport = assembleBlockingBugs(rangeFailBugsReduced, ReportInfo.runType);
+      generateReducedReport(BuildInfo, BugReport, ReportInfo, ReportNotes);
+      break;
+  }
+  
+}
+
+function generateFullReport(BuildInfo, BugReport, ReportInfo, ReportNotes) {
+  
+  var bNewBlockers = BugReport.newB;
+  var bExistingBlockers = BugReport.existingB;
+  
+  rTitle = Utilities.formatString(
+    "%s %s %s %s Flash %s/%s Smoke Test Results - %s/%s tests passed, ", // %s new blockers, %s existing blockers", 
+    BuildInfo.bBuildDate, BuildInfo.bDevice, ReportInfo.buildBranch, ReportInfo.flashMethod, BuildInfo.bPhoneMem, BuildInfo.bBaseImage, BuildInfo.bPassC, BuildInfo.bCasesRun);
+  
+  rBodyIntro = Utilities.formatString(
+    "%s out of %s tests passed for the %s %s %s Flash %s %s Build. There ",
+    BuildInfo.bPassC, BuildInfo.bCasesRun, BuildInfo.bBodyDate, BuildInfo.bDevice, ReportInfo.flashMethod, BuildInfo.bPhoneMem, ReportInfo.buildBranch);
+      
+      
+  if ( bNewBlockers == 0 && bExistingBlockers == 0 ) {
+
+    rTitle += "no new blockers";
+    rBodyIntro += "were no new issues, and no existing blockers that kept the smoketest from fully passing.";
+  }
+  else {
+   
+    var pluralNew = (bNewBlockers == 1) ? "blocker":"blockers";
+    var pluralNewBody = (bNewBlockers == 1) ? "issue":"issues";
+    var pluralExist = (bExistingBlockers == 1) ? "blocker":"blockers";
+    var plural = (pluralNew == "blockers") ? "were":"was";
+    
+    rTitle += Utilities.formatString("%s new %s, %s existing %s", 
+                                     bNewBlockers, pluralNew, bExistingBlockers, pluralExist); 
+    bNewBlockers = (bNewBlockers == 0) ? "no":bNewBlockers;
+    bExistingBlockers = (bExistingBlockers == 0) ? "no":bExistingBlockers;
+    rBodyIntro += Utilities.formatString("%s %s new %s, and %s existing %s that kept the smoketest from fully passing.", 
+                                    plural, bNewBlockers, pluralNewBody, bExistingBlockers, pluralExist); 
+  }
+  
+  
+
+  
+  
+  //BodySLLink: 2.1 Full, need to add case statement based on form input
+  rBodySLLink = Utilities.formatString(
+    "Smoketest Results:\nDaily Smoke Test Logs:\n%s", 
+    uActiveSmoketestResults);
+  
+  var mozRunLink = 
+      Utilities.formatString("https://moztrap.mozilla.org/runtests/run/%s/env/27835/", ReportNotes.mozRunNum);
+  var mozResultsLink = 
+      Utilities.formatString("https://moztrap.mozilla.org/results/cases/?filter-run=%s", ReportNotes.mozRunNum);
+  rMozLink = Utilities.formatString(
+    "Moztrap Links:\nRun: %s\nResults: %s",
+    mozRunLink, mozResultsLink);
+  
+  //BodyEnVars
+  rBodyEnVars = Utilities.formatString(
+    "Tests Were Performed With:\nBuild ID: %s (%s Flash)\nGecko: %s\nGaia: %s\nGonk: %s\nBase Image: %s\nOTA Updated From: %s\n\n%s reboots\n%s crashes",
+    BuildInfo.bBuildID, ReportInfo.flashMethod, BuildInfo.bGecko, BuildInfo.bGaia, BuildInfo.bGonk, BuildInfo.bBaseImage, BuildInfo.bOTAFrom, BuildInfo.bReboots, BuildInfo.bCrashes);
+  
+}
+
+function generateReducedReport(BuildInfo, BugReport, ReportInfo, ReportNotes) {
+  //var rangeFailBugsReduced = 'C21:C64';
+  //var rangeAutoPerformed = 'C66:C70';
+  //var rangeAutoBugsLogged = 'C73:C74'; //73 = new; 74 = existing
+  
+  
+  var activeSheet = SpreadsheetApp.getActiveSheet();
+  Logger.log("generate Reduced Report; activeSheet: %s", activeSheet.getName());
+  
+  //automated test variables
+  var dAutoPerformedRange = activeSheet.getRange(rangeAutoPerformed);  //sheet.getSheetevValues(2, C, 15, 1);
+  dAutoPerformedRange.activate();
+  
+  
+  var autoValues = dAutoPerformedRange.getValues();
+  var autoTestsRun = autoValues[0][0];
+  var autoTestsDisabled = autoValues[1][0];
+  var autoTestsPassed = autoValues[2][0];
+  
+  var bNewBlockers = BugReport.newB;
+  var bExistingBlockers = BugReport.existingB;
+  
+  var totalTestsRun = BuildInfo.bCasesRun + autoTestsRun;
+  var totalTestsPassed = BuildInfo.bPassC + autoTestsPassed;
+  
+  rTitle = Utilities.formatString(
+    "%s %s Flash %s %s/%s %s Smoke Tests Results - %s/%s tests passed, ", // %s new blockers, %s existing blockers", 
+    BuildInfo.bBuildDate, ReportInfo.flashMethod, BuildInfo.bDevice, BuildInfo.bPhoneMem, BuildInfo.bBaseImage, ReportInfo.buildBranch, totalTestsPassed, totalTestsRun);
+  Logger.log("after title");
+      
+  if ( bNewBlockers == 0 && bExistingBlockers == 0 ) {
+
+    rTitle += "no new blockers";
+    rBodyIntro += "were no new issues, and no existing blockers that kept the smoketest from fully passing.";
+  }
+  else {
+   
+    var pluralNew = (bNewBlockers == 1) ? "blocker":"blockers";
+    //var pluralNewBody = (bNewBlockers == 1) ? "issue":"issues";
+    var pluralExist = (bExistingBlockers == 1) ? "blocker":"blockers";
+    var plural = (pluralNew == "blockers") ? "were":"was";
+    
+    rTitle += Utilities.formatString("%s new %s, %s existing %s", 
+                                     bNewBlockers, pluralNew, bExistingBlockers, pluralExist); 
+    bNewBlockers = (bNewBlockers == 0) ? "no":bNewBlockers;
+    bExistingBlockers = (bExistingBlockers == 0) ? "no":bExistingBlockers;
+    //rBodyIntro += Utilities.formatString("%s %s new %s, and %s existing %s that kept the smoketest from fully passing.", 
+    //                                plural, bNewBlockers, pluralNewBody, bExistingBlockers, pluralExist); 
+  }
+  
+  Logger.log("before intro");
+  Logger.log("autoTestedPassed: %s\nautoTestsRun: %s\nautoTestsDisabled: %s\n", autoTestsPassed, autoTestsRun, autoTestsDisabled);
+  rBodyIntro = Utilities.formatString(
+    "Test Results\n* %s/%s automated smoketests passing (%s disabled)\n* %s/%s manual smoketests passing\n* %s reboots\n* %s crashes\n",
+    autoTestsPassed, autoTestsRun, autoTestsDisabled, BuildInfo.bPassC, BuildInfo.bCasesRun, BuildInfo.bCrashes, BuildInfo.bReboots);
+  Logger.log("after intro");
+
+  
+  //BodySLLink: 2.1 Full, need to add case statement based on form input
+  rBodySLLink = Utilities.formatString(
+    "Links:\nDaily Smoke Test Logs:\n%s", 
+    uActiveSmoketestResults);
+  
+  var mozResultsLink = 
+      Utilities.formatString("https://moztrap.mozilla.org/results/cases/?filter-run=%s", ReportNotes.mozRunNum);
+  rMozLink = Utilities.formatString(
+    "Moztrap Results:\n%s",
+    mozResultsLink);
+  
+  //BodyEnVars
+  rBodyEnVars = Utilities.formatString(
+    "Build Information (%s Flash):\nBuild ID: %s\nGaia: %s\nGecko: %s\nVersion: %s\nGonk: %s\nBase Image: %s\nOTA Updated From: %s\n",
+    ReportInfo.flashMethod, BuildInfo.bBuildID, BuildInfo.bGaia, BuildInfo.bGecko, BuildInfo.bVersion, BuildInfo.bGonk, BuildInfo.bBaseImage, BuildInfo.bOTAFrom);
+  
+}
+
+function assembleBlockingBugs(activeRangeFailBugs, runType) {
+  
+  var activeSheet = SpreadsheetApp.getActiveSheet();
+  //assemble range of cases to detect fails
+  var dFailedBugsRange = activeSheet.getRange(activeRangeFailBugs);  //sheet.getSheetevValues(2, C, 15, 1);
+  dFailedBugsRange.activate();
+  
+  var bugValues = dFailedBugsRange.getValues();
+  
+  //prepare variables to hold all NEW bugs and all existing blockers (no NEW at beginning of cell)
+  var newBugs = [];
+  var newBlockersCount = 0;
+  
+  var preBlockers = [];
+  var preBlockersCount = 0;
+  
+  //for each case, check the contents of the cell to determine if it's a Fail case, and parse to either newBugs or preBlockers
+  for ( var i in bugValues ) {
+                
+    var bugCell = bugValues[i][0].split(" ");
+    Logger.log("bugcell val @ 0:\n%s", bugCell[0]);
+    //DEV NOTE: can add to arrays first since code is the same, then remove duplicates afterwards with same code, pass in both arrays
+    if ( bugCell[0] == 'NEW' || bugCell[0] == '[NEW]' || bugCell[0] == 'New') {
+      
+      var newFlag = true;
+      for ( var newBug in newBugs ) {
+       
+        if ( bugValues[i][0] == newBugs[newBug] ) 
+        {
+          newFlag = false;
+          break; //found duplicate, stop search and don't add
+        }
+      }
+      if ( newFlag == true )
+      {
+        newBugs.push(bugValues[i][0]);
+        newBlockersCount++; //if it's a new issue, push the bug into the array and increment our new blockers count
+      }
+    } //otherwise, if the first word is Fail, then it's an existing blocker
+    else if ( bugCell[0] == 'Fail') {
+      
+      var newFlag = true;
+      for ( var loggedBugs in preBlockers ) {
+       
+        if ( bugValues[i][0] == preBlockers[loggedBugs] ) 
+        {
+          newFlag = false;
+          break; //bug already accounted for
+        }
+      }
+      if ( newFlag == true )
+      {
+        preBlockers.push(bugValues[i][0]);
+        preBlockersCount++;
+      }
+      
+    }
+  }
+  
+  //New Blockers
+  //extract bug titles and links and push into new array
+  var rNewBlockers = []; //array for new blockers: [bug title, bug link]
+  
+  for ( var bug in newBugs )
+  {
+    var newSplitStrings = [];
+    newSplitStrings = newBugs[bug].split(" ");
+    var fullBugLink = newSplitStrings.pop(); //pull bug link
+    var bugLink = "https://bugzil.la/" + fullBugLink.substring(45); //rip off the bug #
+    newSplitStrings.shift(); //remove NEW
+    newSplitStrings.shift(); //remove fail
+    newSplitStrings.shift(); //remove hyphen
+    
+    var bugTitle = "";
+    for (var titleWord in newSplitStrings) {
+      
+      bugTitle += newSplitStrings[titleWord] + " ";
+    }
+    bugTitle.trim();
+    
+    rNewBlockers.push("- " + bugTitle + "\n" + bugLink);
+  }
+
+  
+  //Existing Blockers
+  //extract bug titles and links and push into new array
+  var rExistingBlockers = [,]; //array for existing blockers: (bug title, bug link) -- initialized above
+  
+  for ( var bug in preBlockers )
+  {
+    var preSplitStrings = [];
+    preSplitStrings = preBlockers[bug].split(" ");
+    var fullBugLink = preSplitStrings.pop(); //pull bug link
+    var bugLink = "https://bugzil.la/" + fullBugLink.substring(45); //rip off the bug #
+    preSplitStrings.shift(); //remove fail
+    preSplitStrings.shift(); //remove hyphen
+    
+    var bugTitle = "";
+    for (var titleWord in preSplitStrings) {
+      
+      bugTitle += preSplitStrings[titleWord] + " ";
+    }
+    bugTitle.trim();
+    
+    rExistingBlockers.push("- " + bugTitle + "\n" + bugLink);
+  }
+  
+  
+  //Set Bug Report for email
+  //add new blockers to bug report
+  rBodyBugReport = "New Bugs Breaking the Smoketests:\n";
+  if ( newBlockersCount == 0 )
+  {
+    rBodyBugReport += "- None Reported\n";
+  }
+  else {
+    for ( var bug in rNewBlockers ) {
+      
+      rBodyBugReport += rNewBlockers[bug] + "\n";
+    }
+  }
+  rBodyBugReport += "\n";
+  
+  rBodyBugReport += "Existing Bugs Breaking the Smoketests:\n";
+  if ( preBlockersCount == 0 )
+  {
+    rBodyBugReport += "- None Reported\n";
+  }
+  else {
+    for ( var bug in rExistingBlockers ) {
+      
+      rBodyBugReport += rExistingBlockers[bug] + "\n";
+    }
+  }
+  rBodyBugReport += "\n";
+  
+  if (runType == "full")
+  {
+    rBodyBugReport += "New Issues Not Breaking the Smoketests:\n- None Reported\n";
+  }
+  else if ( runType == "reduced")
+  {
+    //automated test bugs logged
+    var dAutoBugsLogged = activeSheet.getRange(rangeAutoBugsLogged);
+    dAutoBugsLogged.activate();
+    
+    //will present inaccurate information if not None Reported -- investigate laterwith bugs actual format
+    var autoBugValues = dAutoBugsLogged.getValues();
+    var autoNewBugs = autoBugValues[0][0];
+    var autoExistBugs = autoBugValues[1][0];
+    
+    rBodyBugReport += "New Bugs Breaking Automated Smoketests:\n- " + autoNewBugs;
+    rBodyBugReport += "\n\n";
+    rBodyBugReport += "Existing Bugs Breaking Automated Smoketests:\n- " + autoExistBugs;
+  
+    //update existing blockers and new blockers with automated results
+  }
+    
+  var existingB = preBlockersCount;
+  var newB = newBlockersCount;
+  
+  return {newB: newB, existingB: existingB};
+}
+
+/*
+* compileReport
+*  assembles all the information we need from the smoketest log (and soon form) and creates our report
+*  after we've created, email it to the team so that we can verify it collected  correctly
+*
+* Report Elements:
+* ----------------
+* Title = rTitle
+* Intro Paragraph = rBodyIntro
+* rBodySLLink = Smoketest Log Link:
+* rBodyMozLink = Moztrap Link (need to request user to enter from form)
+* rBodyNotes = Notes under Intro (need to request user to enter from form)
+* rBodyEnVars = Environmental Variables
+* rNewBlockers = New Bugs failing smoketests
+* rExistingBlockers = Existing Blockers failing smoketests
+* rBodyClose = Closing Block to email
+*/
+function compileReport(runType) {
+
+  if (runType == "full")
+  {
+    //BodyClose & Compiled Report
+    rBodyClose = "Sincerely,\nMozilla QA Team";
+    
+    CompiledReport = 
+      rBodyIntro + "\n\n" + 
+        rBodyNotes +
+          rBodySLLink + "\n\n" + 
+            rMozLink + "\n\n" +
+              rBodyEnVars + "\n\n" + 
+                rBodyBugReport + "\n\n" +
+                  rBodyClose;
+    
+  }
+  else if (runType == "reduced")
+  {
+    rBodyClose = "Sincerely,\nMozilla QA Team";
+    
+    CompiledReport =
+      rBodyNotes + 
+        rBodyIntro + "\n" +
+          rBodyBugReport + "\n\n" +
+            rBodyEnVars + "\n" +
+              rBodySLLink + "\n" +
+                rMozLink + "\n\n" +
+                  rBodyClose;
+  }
+  else
+  {
+    Logger.log("CompileReport Error: incorrect run type -> %s", runType); 
+  }
+  
+  Logger.log("Compiled Report:\n%s\n%s", rTitle, CompiledReport);
+  
+}
+
+function sendSmokeReport()
+{
+
+  rTitle += "$$";
+  var smokeEmailGroup = 
+      ["onelson@qanalydocs.com", "pbylenga@qanalydocs.com", "dharris@qanalydocs.com", "mshuman@qanalydocs.com", "jmitchell@qanalydocs.com"];
+  var qanalystsGroup = 
+      [
+        "onelson@qanalydocs.com", "pbylenga@qanalydocs.com", "dharris@qanalydocs.com", "mshuman@qanalydocs.com", "jmitchell@qanalydocs.com",
+       "jmercado@qanalydocs.com", "pcheng@qanalydocs.com", "bzumwalt@qanalydocs.com", "ychung@qanalydocs.com"
+      ];
+  MailApp.sendEmail(
+    //qanalystsGroup,
+    "onelson@qanalydocs.com",
+    rTitle, CompiledReport);
+}
+
+function directReportFlow(ReportInfo, ReportNotes, savePrefs) {
+
+  if (savePrefs == true) {
+    Logger.log("save prefs attempted");
+    var userProperties = PropertiesService.getUserProperties();
+    userProperties.setProperty('buildBranch', ReportInfo.buildBranch);
+    userProperties.setProperty('runType', ReportInfo.runType);
+    userProperties.setProperty('flashMethod', ReportInfo.flashMethod);
+    //userProperties.setProperty('previousNotes', ReportNotes.notes);
+  }
+  
+  var ss = SpreadsheetApp.openByUrl(uSmoketestLog);//uSmoketestResults);//uSmoketestLog);
+  SpreadsheetApp.setActiveSpreadsheet(ss);
+  
+  Logger.log("sheet set");
+  //determine sheet to poll information from
+  var activeSheetName = "";
+
+  switch (ReportInfo.runType)
+  {
+      
+    case "full":
+
+      if (ReportInfo.buildBranch == "Master") {
+       activeSheetName = sFullMaster; 
+       uActiveSmoketestResults = uSmoketestResults30F; 
+      }
+      else if (ReportInfo.buildBranch == "2.2") { //2.2
+       
+       activeSheetName = sFull22; 
+       uActiveSmoketestResults = uSmoketestResults22F; 
+      }
+      else if (ReportInfo.buildBranch == "2.1") { //2.1
+       
+       activeSheetName = sFull21; 
+       uActiveSmoketestResults = uSmoketestResults21F; 
+      }
+      break;
+    case "reduced":
+      if (ReportInfo.buildBranch == "Master") {
+       
+       activeSheetName = sReducedMaster; 
+       uActiveSmoketestResults = uSmoketestResults30R; 
+      }
+      else if (ReportInfo.buildBranch == "2.2") { //2.2
+       
+       activeSheetName = sReduced22; 
+       uActiveSmoketestResults = uSmoketestResults22R; 
+      }
+      else if (ReportInfo.buildBranch == "2.1") { //2.1
+       
+       activeSheetName = sReduced21; 
+       uActiveSmoketestResults = uSmoketestResults21R; 
+      }
+      break;
+    default:
+      Logger.log("something went wrong");
+  }
+  
+  ss.setActiveSheet(ss.getSheetByName(activeSheetName));//var sheet = SpreadsheetApp.getActiveSheet(); //appears to be opening first of the spreadsheet
+  var sheet = ss.getActiveSheet();
+  sheet.activate();
+ 
+  /*
+  var protection = sheet.getSheetProtection();
+  var ableUsers = protection.getUsers();
+  
+  Logger.log("protection: %s\nableUsers: %s", protection, ableUsers);
+  */
+  Logger.log("about to assembleBuildInfo");
+  assembleBuildInfo(ReportInfo, ReportNotes);
+  compileReport(ReportInfo.runType);
+  sendSmokeReport();
+  return CompiledReport;
+}
+
+
+/**
+ * Gets the stored user preferences for the origin and destination languages,
+ * if they exist.
+ *
+ * @return {Object} The user's origin and destination language preferences, if
+ *     they exist.
+ */
+function getPreferences() {
+  Logger.log("get preferences attempted");
+  var userProperties = PropertiesService.getUserProperties();
+  var reportPrefs = {
+    buildBranch: userProperties.getProperty('buildBranch'),
+    runType: userProperties.getProperty('runType'),
+    flashMethod: userProperties.getProperty('flashMethod')
+    //previousNotes: userProperties.getProperty('previousNotes')
+  }
+  
+  return reportPrefs;
+}
+
+function forFun() {
+ 
+  var emailTo = 'mshuman@qanalydocs.com, onelson@qanalydocs.com';
+  var myTitle = "Creating Dynamic Hyperlinks in Email";
+  var myBody = "I think my body became void, since I replaced it with a HTML body";  
+  
+  var options = {}
+  options.htmlBody = "To see where I learned how to do this, " + '<a href=\"' + 'https://productforums.google.com/forum/#!topic/docs/WvW-lAr3pg8' + '">click here</a><br />';
+
+  
+  MailApp.sendEmail(emailTo, myTitle, myBody, options);
+}
+
+function moreFun() {
+ 
+  var a = [];
+  a.push("car");
+  a.push("motorola");
+  Logger.log("Type of 'a'  after push: %s", typeof(a));
+  Logger.log(a);
+  a += "van";
+  Logger.log("Type of 'a' after +=: %s", typeof(a));
+  //a.push("next value here");
+  //a.push("TREX");
+  Logger.log(a);
+  
+}
